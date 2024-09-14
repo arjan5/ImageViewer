@@ -1,264 +1,335 @@
 import sys
 import os
+import cv2
+import numpy as np
+from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton, QFileDialog, QVBoxLayout, QWidget, QLabel, QHBoxLayout, QSplitter, QCheckBox, QSpinBox
+from PyQt5.QtGui import QPixmap, QImage
+from PyQt5.QtCore import QTimer, Qt
+from PIL import Image as PILImage
+from PIL import ImageSequence
 import random
-from PyQt5.QtWidgets import (QApplication, QWidget, QLabel, QVBoxLayout, QPushButton,
-                             QFileDialog, QHBoxLayout, QLineEdit, QCheckBox, QScrollArea, QSizePolicy)
-from PyQt5.QtGui import QPixmap, QFont
-from PyQt5.QtCore import Qt, QTimer
 
-
-class ImageViewer(QWidget):
-    def __init__(self, parent=None, remove_callback=None):
-        super().__init__(parent)
-
-        self.remove_callback = remove_callback
-
-        self.image_label = QLabel(self)
-        self.image_label.setAlignment(Qt.AlignCenter)
-        self.image_label.setScaledContents(True)
-        self.image_label.setMinimumSize(1, 1)
-
-        self.current_image_index = -1
-        self.image_files = []
-        self.slideshow_running = False
-
-        # Timer for the slideshow
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.next_image_in_slideshow)
-
-        # Main layout for a single viewer
-        layout = QVBoxLayout()
-
-        # Add QLabel to layout
-        layout.addWidget(self.image_label)
-
-        # Buttons layout
-        button_layout = QHBoxLayout()
-
-        # Previous button
-        prev_button = QPushButton('Previous')
-        prev_button.clicked.connect(self.show_previous_image)
-        button_layout.addWidget(prev_button)
-
-        # Next button
-        next_button = QPushButton('Next')
-        next_button.clicked.connect(self.show_next_image)
-        button_layout.addWidget(next_button)
-
-        # Add buttons layout to main layout
-        layout.addLayout(button_layout)
-
-        # Slideshow Button
-        self.slideshow_button = QPushButton('Start Slideshow')
-        self.slideshow_button.clicked.connect(self.toggle_slideshow)
-        layout.addWidget(self.slideshow_button)
-
-        # Interval Input
-        interval_layout = QHBoxLayout()
-        self.interval_input = QLineEdit(self)
-        self.interval_input.setPlaceholderText('Interval (seconds)')
-        interval_layout.addWidget(self.interval_input)
-
-        # Random Order Checkbox
-        self.random_order_checkbox = QCheckBox("Random Order")
-        interval_layout.addWidget(self.random_order_checkbox)
-
-        layout.addLayout(interval_layout)
-
-        # Remove Button
-        remove_button = QPushButton('Remove')
-        remove_button.clicked.connect(self.remove_self)
-        layout.addWidget(remove_button)
-
-        # Set styles for the remove button
-        remove_button.setStyleSheet("""
-            QPushButton {
-                background-color: #ff4c4c;
-                color: white;
-                padding: 5px 10px;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #ff1c1c;
-            }
-        """)
-
-        self.setLayout(layout)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)  # Even distribution of space
-
-    def load_images(self, directory):
-        # Filter for image files
-        supported_formats = (".png", ".jpg", ".jpeg", ".bmp", ".gif")
-        self.image_files = [os.path.join(directory, f) for f in os.listdir(directory) if
-                            f.lower().endswith(supported_formats)]
-        self.current_image_index = 0
-        if self.image_files:
-            self.show_image(self.current_image_index)
-
-    def show_image(self, index):
-        # Display the image at the current index
-        if 0 <= index < len(self.image_files):
-            pixmap = QPixmap(self.image_files[index])
-            scaled_pixmap = pixmap.scaled(self.image_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            self.image_label.setPixmap(scaled_pixmap)
-
-    def resizeEvent(self, event):
-        if self.image_files and 0 <= self.current_image_index < len(self.image_files):
-            self.show_image(self.current_image_index)
-
-    def show_next_image(self):
-        if self.image_files:
-            self.current_image_index = (self.current_image_index + 1) % len(self.image_files)
-            self.show_image(self.current_image_index)
-
-    def show_previous_image(self):
-        if self.image_files:
-            self.current_image_index = (self.current_image_index - 1) % len(self.image_files)
-            self.show_image(self.current_image_index)
-
-    def toggle_slideshow(self):
-        if self.slideshow_running:
-            self.stop_slideshow()
-        else:
-            self.start_slideshow()
-
-    def start_slideshow(self):
-        try:
-            interval = int(self.interval_input.text()) * 1000  # Convert seconds to milliseconds
-        except ValueError:
-            interval = 2000  # Default to 2 seconds if input is invalid
-
-        if self.image_files:
-            self.slideshow_running = True
-            self.slideshow_button.setText('Stop Slideshow')
-            self.timer.start(interval)
-
-    def stop_slideshow(self):
-        self.slideshow_running = False
-        self.slideshow_button.setText('Start Slideshow')
-        self.timer.stop()
-
-    def next_image_in_slideshow(self):
-        if self.random_order_checkbox.isChecked():
-            self.current_image_index = random.randint(0, len(self.image_files) - 1)
-        else:
-            self.current_image_index = (self.current_image_index + 1) % len(self.image_files)
-
-        self.show_image(self.current_image_index)
-
-    def remove_self(self):
-        if self.remove_callback:
-            self.remove_callback(self)
-
-
-class MultiDirectoryViewer(QWidget):
+class MediaViewer(QMainWindow):
     def __init__(self):
         super().__init__()
-
-        self.setWindowTitle('Multi-Directory Image Viewer')
+        self.setWindowTitle("Media Viewer")
         self.setGeometry(100, 100, 1200, 600)
 
-        self.main_layout = QVBoxLayout()
+        # Create main layout and splitter
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+        self.main_layout = QHBoxLayout(self.central_widget)
 
-        # Button to load multiple directories
-        load_button = QPushButton('Load Directories')
-        load_button.clicked.connect(self.load_directories)
-        self.main_layout.addWidget(load_button)
+        self.splitter = QSplitter(Qt.Horizontal)
+        self.main_layout.addWidget(self.splitter)
 
-        # Set button styles
-        load_button.setStyleSheet("""
-            QPushButton {
-                background-color: #5cb85c;
-                color: white;
-                padding: 10px 20px;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #4cae4c;
-            }
-        """)
+        # Image widget and layout
+        self.image_widget = QWidget()
+        self.image_layout = QVBoxLayout(self.image_widget)
 
-        # Horizontal layout to add multiple ImageViewer widgets
-        self.viewer_layout = QHBoxLayout()
+        self.prev_image_button = QPushButton("Previous Image")
+        self.prev_image_button.clicked.connect(self.prev_image)
+        self.next_image_button = QPushButton("Next Image")
+        self.next_image_button.clicked.connect(self.next_image)
+        self.randomize_images_checkbox = QCheckBox("Randomize Images")
+        self.randomize_images_checkbox.stateChanged.connect(self.toggle_randomize_images)
+        self.slideshow_button = QPushButton("Start Slideshow")
+        self.slideshow_button.clicked.connect(self.toggle_slideshow)
+        self.interval_spinbox = QSpinBox()
+        self.interval_spinbox.setRange(100, 10000)  # Interval range from 100ms to 10s
+        self.interval_spinbox.setValue(1000)  # Default to 1 second
+        self.interval_spinbox.setSuffix(" ms")
+        self.interval_spinbox.valueChanged.connect(self.update_interval)
 
-        # Scroll Area to handle multiple directories horizontally
-        scroll_area = QScrollArea()
-        scroll_widget = QWidget()
-        scroll_widget.setLayout(self.viewer_layout)
-        scroll_area.setWidget(scroll_widget)
-        scroll_area.setWidgetResizable(True)
+        self.image_layout.addWidget(self.prev_image_button)
+        self.image_layout.addWidget(self.next_image_button)
+        self.image_layout.addWidget(self.randomize_images_checkbox)
+        self.image_layout.addWidget(self.slideshow_button)
+        self.image_layout.addWidget(self.interval_spinbox)
 
-        self.main_layout.addWidget(scroll_area)
+        self.image_label = QLabel()
+        self.image_label.setScaledContents(True)  # Ensure the image scales with the label
+        self.image_layout.addWidget(self.image_label)
 
-        self.setLayout(self.main_layout)
+        # Video widget and layout
+        self.video_widget = QWidget()
+        self.video_layout = QVBoxLayout(self.video_widget)
 
-        # Apply overall styles
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #000000;
-                color: #ffffff;
-            }
-            QLabel {
-                border: 1px solid #333;
-                padding: 5px;
-                background-color: #1e1e1e;
-                font-family: Arial, sans-serif;
-                font-size: 14px;
-                color: #ffffff;
-            }
-            QLineEdit {
-                border-radius: 5px;
-                border: 1px solid #444;
-                padding: 5px;
-                background-color: #2c2c2c;
-                color: #ffffff;
-            }
-            QCheckBox {
-                font-family: Arial, sans-serif;
-                font-size: 12px;
-                padding: 5px;
-                color: #ffffff;
-            }
-            QPushButton {
-                background-color: #444;
-                color: white;
-                padding: 10px;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #666;
-            }
-        """)
+        self.prev_video_button = QPushButton("Previous Video")
+        self.prev_video_button.clicked.connect(self.prev_video)
+        self.next_video_button = QPushButton("Next Video")
+        self.next_video_button.clicked.connect(self.next_video)
+        self.randomize_videos_checkbox = QCheckBox("Randomize Videos")
+        self.randomize_videos_checkbox.stateChanged.connect(self.toggle_randomize_videos)
+        self.slideshow_video_button = QPushButton("Start Slideshow")
+        self.slideshow_video_button.clicked.connect(self.toggle_video_slideshow)
+        self.interval_video_spinbox = QSpinBox()
+        self.interval_video_spinbox.setRange(100, 10000)  # Interval range from 100ms to 10s
+        self.interval_video_spinbox.setValue(1000)  # Default to 1 second
+        self.interval_video_spinbox.setSuffix(" ms")
+        self.interval_video_spinbox.valueChanged.connect(self.update_video_interval)
+
+        self.video_layout.addWidget(self.prev_video_button)
+        self.video_layout.addWidget(self.next_video_button)
+        self.video_layout.addWidget(self.randomize_videos_checkbox)
+        self.video_layout.addWidget(self.slideshow_video_button)
+        self.video_layout.addWidget(self.interval_video_spinbox)
+
+        self.video_label = QLabel()
+        self.video_label.setScaledContents(True)  # Ensure the video scales with the label
+        self.video_layout.addWidget(self.video_label)
+
+        # Add widgets to splitter
+        self.splitter.addWidget(self.image_widget)
+        self.splitter.addWidget(self.video_widget)
+
+        # Set equal sizes
+        self.splitter.setSizes([self.width() // 2, self.width() // 2])
+
+        self.image_files = []
+        self.video_files = []
+        self.current_image_index = 0
+        self.current_video_index = 0
+        self.is_randomized_images = False
+        self.is_randomized_videos = False
+        self.slideshow_active = False
+        self.video_slideshow_active = False
+        self.slideshow_interval = 1000
+        self.video_slideshow_interval = 1000
+
+        self.image_timer = QTimer()
+        self.image_timer.timeout.connect(self.update_image)
+        self.video_timer = QTimer()
+        self.video_timer.timeout.connect(self.update_video)
+
+        self.load_directories()
 
     def load_directories(self):
-        # Allow user to select multiple directories
-        directory = QFileDialog.getExistingDirectory(self, "Select Directory",
-                                                     options=QFileDialog.ShowDirsOnly | QFileDialog.DontUseNativeDialog)
-        if directory:
-            # Add one ImageViewer per directory
-            viewer = ImageViewer(remove_callback=self.remove_viewer)
-            viewer.load_images(directory)
-            self.viewer_layout.addWidget(viewer)
+        file_dialog = QFileDialog(self)
+        file_dialog.setFileMode(QFileDialog.Directory)
+        file_dialog.setOption(QFileDialog.DontUseNativeDialog, True)
+        file_dialog.setViewMode(QFileDialog.List)
+        file_dialog.setWindowTitle("Select Directories (Hold Ctrl for multiple)")
+        if file_dialog.exec_():
+            dirs = file_dialog.selectedFiles()
+            for directory in dirs:
+                for file_name in os.listdir(directory):
+                    file_path = os.path.join(directory, file_name)
+                    if file_path.lower().endswith(('.png', '.jpg', '.jpeg')):
+                        self.image_files.append(file_path)
+                    elif file_path.lower().endswith(('.mp4', '.webm', '.gif')):
+                        self.video_files.append(file_path)
 
-    def remove_viewer(self, viewer):
-        # Remove the viewer from the layout and adjust the window
-        self.viewer_layout.removeWidget(viewer)
-        viewer.deleteLater()
+        self.image_files.sort()
+        self.video_files.sort()
 
-        # Force the layout to adjust sizes after removing a viewer
-        self.adjust_layout()
+        print(f"Loaded image files: {self.image_files}")
+        print(f"Loaded video files: {self.video_files}")
 
-    def adjust_layout(self):
-        # Loop through all the viewers and set them to have equal width
-        total_viewers = self.viewer_layout.count()
-        for i in range(total_viewers):
-            widget = self.viewer_layout.itemAt(i).widget()
-            widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-            widget.updateGeometry()
+        if self.image_files:
+            self.show_image(0)
+        if self.video_files:
+            self.show_video(0)
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.update_image()
+        self.update_video()
 
-if __name__ == '__main__':
+    def show_image(self, index):
+        if not self.image_files:
+            print("No image files available.")
+            return
+
+        if self.is_randomized_images:
+            self.image_files = random.sample(self.image_files, len(self.image_files))
+            self.current_image_index = 0
+
+        if index < 0:
+            index = len(self.image_files) - 1
+        elif index >= len(self.image_files):
+            index = 0
+
+        file_path = self.image_files[index]
+        image = PILImage.open(file_path)
+        img_width, img_height = image.size
+
+        # Resize image to fit within the image label
+        widget_width = self.image_label.width()
+        widget_height = self.image_label.height()
+        img_ratio = img_width / img_height
+        widget_ratio = widget_width / widget_height
+
+        if img_ratio > widget_ratio:
+            new_width = widget_width
+            new_height = int(new_width / img_ratio)
+        else:
+            new_height = widget_height
+            new_width = int(new_height * img_ratio)
+
+        image = image.resize((new_width, new_height), PILImage.Resampling.LANCZOS)
+        qt_image = QImage(np.array(image), image.width, image.height, image.width * 3, QImage.Format_RGB888)
+        pixmap = QPixmap.fromImage(qt_image)
+
+        self.image_label.setPixmap(pixmap)
+        self.current_image_index = index
+
+    def show_video(self, index):
+        if not self.video_files:
+            print("No video files available.")
+            return
+
+        if self.is_randomized_videos:
+            self.video_files = random.sample(self.video_files, len(self.video_files))
+            self.current_video_index = 0
+
+        if index < 0:
+            index = len(self.video_files) - 1
+        elif index >= len(self.video_files):
+            index = 0
+
+        file_path = self.video_files[index]
+
+        # Release previous video capture if it exists
+        if hasattr(self, 'cap'):
+            self.cap.release()
+
+        if file_path.lower().endswith('.gif'):
+            self.gif_file = PILImage.open(file_path)
+            self.gif_frames = [frame.copy() for frame in ImageSequence.Iterator(self.gif_file)]
+            self.gif_index = 0
+            self.gif_timer = QTimer()
+            self.gif_timer.timeout.connect(self.update_gif)
+            self.gif_timer.start(int(1000 / self.gif_file.info['duration']))
+            self.video_label.setPixmap(QPixmap.fromImage(QImage(np.array(self.gif_frames[self.gif_index]), self.gif_frames[self.gif_index].width, self.gif_frames[self.gif_index].height, self.gif_frames[self.gif_index].width * 3, QImage.Format_RGB888)))
+        else:
+            self.cap = cv2.VideoCapture(file_path)
+            if not self.cap.isOpened():
+                print(f"Error: Unable to open video file {file_path}")
+                return
+
+            self.fps = self.cap.get(cv2.CAP_PROP_FPS)
+            if self.fps <= 0:
+                self.fps = 30  # Default to 30 FPS if unable to get FPS
+
+            self.video_timer.start(int(1000 / self.fps))
+
+        self.current_video_index = index
+
+    def update_image(self):
+        if self.slideshow_active:
+            self.next_image()
+
+    def update_video(self):
+        if hasattr(self, 'cap'):
+            ret, frame = self.cap.read()
+            if ret:
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                h, w, ch = frame.shape
+                qt_image = QImage(frame.data, w, h, ch * w, QImage.Format_RGB888)
+                pixmap = QPixmap.fromImage(qt_image)
+
+                # Resize video to fit within the video label
+                widget_width = self.video_label.width()
+                widget_height = self.video_label.height()
+                frame_width = pixmap.width()
+                frame_height = pixmap.height()
+                frame_ratio = frame_width / frame_height
+                widget_ratio = widget_width / widget_height
+
+                if frame_ratio > widget_ratio:
+                    new_width = widget_width
+                    new_height = int(new_width / frame_ratio)
+                else:
+                    new_height = widget_height
+                    new_width = int(new_height * frame_ratio)
+
+                pixmap = pixmap.scaled(new_width, new_height, Qt.KeepAspectRatio)
+                self.video_label.setPixmap(pixmap)
+
+                # Continue slideshow or go to next video if slideshow is active
+                if self.video_slideshow_active:
+                    if not ret:
+                        self.cap.release()
+                        self.next_video()
+            else:
+                self.cap.release()
+                if self.video_slideshow_active:
+                    self.next_video()
+        elif hasattr(self, 'gif_timer'):
+            self.update_gif()
+
+    def update_gif(self):
+        if self.gif_frames:
+            self.gif_index = (self.gif_index + 1) % len(self.gif_frames)
+            frame = self.gif_frames[self.gif_index]
+            qt_image = QImage(np.array(frame), frame.width, frame.height, frame.width * 3, QImage.Format_RGB888)
+            self.video_label.setPixmap(QPixmap.fromImage(qt_image))
+
+    def prev_image(self):
+        self.current_image_index = (self.current_image_index - 1) % len(self.image_files)
+        self.show_image(self.current_image_index)
+
+    def next_image(self):
+        self.current_image_index = (self.current_image_index + 1) % len(self.image_files)
+        self.show_image(self.current_image_index)
+
+    def prev_video(self):
+        self.current_video_index = (self.current_video_index - 1) % len(self.video_files)
+        self.show_video(self.current_video_index)
+
+    def next_video(self):
+        self.current_video_index = (self.current_video_index + 1) % len(self.video_files)
+        self.show_video(self.current_video_index)
+
+    def toggle_randomize_images(self, state):
+        self.is_randomized_images = (state == Qt.Checked)
+        if self.is_randomized_images:
+            random.shuffle(self.image_files)
+            self.current_image_index = 0
+            self.show_image(self.current_image_index)
+
+    def toggle_randomize_videos(self, state):
+        self.is_randomized_videos = (state == Qt.Checked)
+        if self.is_randomized_videos:
+            random.shuffle(self.video_files)
+            self.current_video_index = 0
+            self.show_video(self.current_video_index)
+
+    def toggle_slideshow(self):
+        if self.slideshow_active:
+            self.slideshow_active = False
+            self.slideshow_button.setText("Start Slideshow")
+            self.image_timer.stop()
+        else:
+            self.slideshow_active = True
+            self.slideshow_button.setText("Stop Slideshow")
+            self.update_interval()
+            self.image_timer.start(self.slideshow_interval)
+
+    def toggle_video_slideshow(self):
+        if self.video_slideshow_active:
+            self.video_slideshow_active = False
+            self.slideshow_video_button.setText("Start Slideshow")
+            self.video_timer.stop()
+        else:
+            self.video_slideshow_active = True
+            self.slideshow_video_button.setText("Stop Slideshow")
+            self.update_video_interval()
+            self.video_timer.start(self.video_slideshow_interval)
+
+    def update_interval(self):
+        self.slideshow_interval = self.interval_spinbox.value()
+        if self.slideshow_active:
+            self.image_timer.start(self.slideshow_interval)
+
+    def update_video_interval(self):
+        self.video_slideshow_interval = self.interval_video_spinbox.value()
+        if self.video_slideshow_active:
+            self.video_timer.start(self.video_slideshow_interval)
+
+if __name__ == "__main__":
     app = QApplication(sys.argv)
-    viewer = MultiDirectoryViewer()
+    viewer = MediaViewer()
     viewer.show()
     sys.exit(app.exec_())
